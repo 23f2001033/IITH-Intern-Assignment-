@@ -1,4 +1,4 @@
-﻿# large / generated files are not committed
+# large / generated files are not committed
 data/
 raw_data/
 preprocessed_data/
@@ -10,3 +10,7 @@ output/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+work/
+*.log
+# the pretrained vocoder is needed to run the project and fits in GitHub's limit
+!core/hifigan/generator_universal.pth.tar.zip

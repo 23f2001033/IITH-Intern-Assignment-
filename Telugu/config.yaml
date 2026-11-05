@@ -1,0 +1,104 @@
+# Clip selection. One speaker only: the male voice has 12.8 h of 48 kHz audio,
+# enough for the full 5 h + 1 h without mixing in the 16 kHz female recordings.
+data:
+  seed: 1234
+  gender_id: 1
+  speaker_name: "te_male"
+  train_hours: 5.2
+  val_hours: 1.05
+  min_seconds: 1.0
+  max_seconds: 15.0
+
+# No pretrained Telugu acoustic model exists, so MFA trains one on this corpus
+align:
+  acoustic_model: null
+  single_speaker: True
+  beam: 100
+  retry_beam: 400
+
+inference:
+  compare:
+    sentences: ["T2a", "T2b"]
+    word: "పట్టు"
+    label: "pattu (grip in T2a, silk in T2b)"
+
+preprocess:
+  dataset: "IndicTTS_Telugu"
+  path:
+    raw_path: "raw_data"
+    preprocessed_path: "preprocessed_data"
+    filelist_path: "preprocessed_data/filelists"
+    lexicon_path: "preprocessed_data/lexicon.txt"
+  preprocessing:
+    max_frames: 1400
+    text:
+      text_cleaners: []
+      language: "te"
+    # Must match hifigan/config.json; train.py and inference.py stop if they differ
+    audio:
+      sampling_rate: 22050
+      max_wav_value: 32768.0
+    stft:
+      filter_length: 1024
+      hop_length: 256
+      win_length: 1024
+    mel:
+      n_mel_channels: 80
+      mel_fmin: 0
+      mel_fmax: 8000
+    pitch:
+      feature: "phoneme_level"
+      normalization: True
+    energy:
+      feature: "phoneme_level"
+      normalization: True
+
+model:
+  transformer:
+    encoder_layer: 4
+    encoder_head: 2
+    encoder_hidden: 256
+    decoder_layer: 6
+    decoder_head: 2
+    decoder_hidden: 256
+    conv_filter_size: 1024
+    conv_kernel_size: [9, 1]
+    encoder_dropout: 0.2
+    decoder_dropout: 0.2
+  variance_predictor:
+    filter_size: 256
+    kernel_size: 3
+    dropout: 0.5
+  variance_embedding:
+    pitch_quantization: "linear"
+    energy_quantization: "linear"
+    n_bins: 256
+  multi_speaker: False
+  max_seq_len: 1500
+  vocoder:
+    model: "HiFi-GAN"
+    speaker: "universal"
+
+train:
+  path:
+    ckpt_path: "ckpt"
+    log_path: "log"
+    result_path: "result"
+  optimizer:
+    batch_size: 16
+    num_workers: 2
+    betas: [0.9, 0.98]
+    eps: 0.000000001
+    weight_decay: 0.0
+    grad_clip_thresh: 1.0
+    grad_acc_step: 1
+    warm_up_step: 4000
+    anneal_steps: [50000, 70000, 90000]
+    anneal_rate: 0.3
+  step:
+    total_step: 100000
+    log_step: 100
+    synth_step: 5000
+    val_step: 1000
+    save_step: 5000
+    keep_checkpoints: 3
