@@ -1,0 +1,12 @@
+﻿# large / generated files are not committed
+data/
+raw_data/
+preprocessed_data/
+output/
+*.pth.tar
+*.pt
+*.zip
+*.parquet
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
