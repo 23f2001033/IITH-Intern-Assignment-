@@ -34,6 +34,7 @@ This file lists every change. The model architecture itself is unchanged.
 | `preprocessor/preprocessor.py` | Blank intervals in TextGrids were dropped. Current MFA versions write silence as blanks. | Pauses lose their frames, so durations stop matching the mel-spectrogram. |
 | `text/__init__.py` | Unknown phones were silently removed. | Phone and duration sequences go out of step. Now raises an error. |
 | `model/modules.py` | The energy predictor received `p_control` instead of `e_control`. | `--energy_control` had no effect and the pitch control scaled energy. |
+| `utils/tools.py` | Energy was the only target not cast to float32, and NumPy 2 saves it as float64 after normalisation. | Training crashed on the first GPU backward pass with `Found dtype Double but expected Float`. CPU runs do not show this. |
 | `audio/stft.py` | Hard-coded `.cuda()` calls. | Feature extraction crashed on machines without a GPU. |
 | `preprocessor/preprocessor.py` | Audio was loaded at librosa's default rate and text with the system encoding. | Breaks with other configured rates and with non-ASCII text on some systems. |
 

@@ -101,11 +101,25 @@ RESTORE_STEP = {"English": 0, "Telugu": 0}
     SETUP,
     '''# Unpack the features. Checkpoints and logs live in /kaggle/working so Kaggle keeps them.
 subprocess.run("nvidia-smi", shell=True)
+subprocess.run("find /kaggle/input -maxdepth 6 -not -name '*.npy' | head -40", shell=True)
+
+def unpack(language, work):
+    """Kaggle can keep a tar as it is or unpack it when an output becomes an input."""
+    tars = glob.glob("/kaggle/input/**/{}_preprocessed.tar*".format(language), recursive=True)
+    tars = [path for path in tars if os.path.isfile(path)]
+    if tars:
+        subprocess.run(["tar", "-xf", tars[0], "-C", work], check=True)
+        return
+    folders = glob.glob("/kaggle/input/**/preprocessed_data/feature_summary.json", recursive=True)
+    folders = [os.path.dirname(path) for path in folders]
+    folders = [path for path in folders if language in path] or folders
+    assert len(folders) == 1, "Expected one {} input, found: {}".format(language, folders)
+    shutil.copytree(folders[0], work + "/preprocessed_data", dirs_exist_ok=True)
+
 for language in LANGUAGES:
-    tar = glob.glob("/kaggle/input/**/{}_preprocessed.tar".format(language), recursive=True)[0]
     work = "/tmp/tts/" + language
     os.makedirs(work, exist_ok=True)
-    subprocess.run(["tar", "-xf", tar, "-C", work], check=True)
+    unpack(language, work)
     for name in ("ckpt", "log"):
         keep = "/kaggle/working/{}/{}".format(language, name)
         os.makedirs(keep, exist_ok=True)
