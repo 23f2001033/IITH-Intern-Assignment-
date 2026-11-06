@@ -93,10 +93,12 @@ train:
     grad_clip_thresh: 1.0
     grad_acc_step: 1
     warm_up_step: 4000
-    anneal_steps: [50000, 70000, 90000]
+    # Learning-rate drops at 50, 70 and 90% of total_step
+    anneal_steps: [16000, 22400, 28800]
     anneal_rate: 0.3
   step:
-    total_step: 100000
+    # Sized to fit a 10-hour Kaggle run: clips are about 1.4x longer than English
+    total_step: 32000
     log_step: 100
     synth_step: 5000
     val_step: 1000
