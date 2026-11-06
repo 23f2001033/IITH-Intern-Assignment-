@@ -44,6 +44,7 @@ This file lists every change. The model architecture itself is unchanged.
 | `model/modules.py` | Vectorised the length regulator with `repeat_interleave`. The original forced one GPU synchronisation per phoneme. Output was checked to be identical on 200 random cases. |
 | `trainer.py` | Adds data-loading workers, a `--max_hours` limit for Kaggle's 12-hour sessions, checkpoint pruning, tracking of the best validation checkpoint, and skipping of out-of-memory batches. |
 | `utils/model.py` | `check_vocoder_compatible()` stops the run if the mel settings differ from HiFi-GAN's config. |
+| `preprocessor/align.py` | Runs MFA with `--clean`, because `mfa train` and `mfa align` share a database and keep overlapping alignments otherwise, which crashes the TextGrid export. Stops MFA if its working folder is unchanged for 45 minutes, because a crashed export worker leaves MFA waiting forever. |
 
 ## Library compatibility
 

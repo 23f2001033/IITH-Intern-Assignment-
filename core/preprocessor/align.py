@@ -3,11 +3,43 @@ import glob
 import os
 import shlex
 import subprocess
+import time
+
+QUIET_LIMIT_SECONDS = 45 * 60
+POLL_SECONDS = 60
+
+
+def _newest_change(folder):
+    newest = 0
+    for path, _, names in os.walk(folder):
+        for name in names:
+            try:
+                newest = max(newest, os.path.getmtime(os.path.join(path, name)))
+            except OSError:
+                pass
+    return newest
 
 
 def _run(command):
+    """Run MFA, stopping it if its working folder stops changing.
+
+    When an MFA export worker crashes, the main process waits for it forever
+    instead of exiting, so a return code alone cannot be relied on.
+    """
     print("+", " ".join(command), flush=True)
-    subprocess.run(command, check=True)
+    folder = os.environ.get("MFA_ROOT_DIR", os.path.expanduser("~/Documents/MFA"))
+    process = subprocess.Popen(command)
+    newest, changed_at = 0, time.time()
+    while process.poll() is None:
+        time.sleep(POLL_SECONDS)
+        current = _newest_change(folder)
+        if current > newest:
+            newest, changed_at = current, time.time()
+        elif time.time() - changed_at > QUIET_LIMIT_SECONDS:
+            process.kill()
+            raise RuntimeError("MFA stopped making progress; see the log above")
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, command)
 
 
 def align(preprocess_config, config, mfa_command, jobs):
@@ -18,8 +50,10 @@ def align(preprocess_config, config, mfa_command, jobs):
     os.makedirs(output, exist_ok=True)
 
     mfa = shlex.split(mfa_command)
+    # --clean matters for Telugu: train and align share a database, and without it
+    # each clip keeps both alignments, which overlap and crash the TextGrid export.
     options = ["-j", str(jobs), "--beam", str(settings["beam"]),
-               "--retry_beam", str(settings["retry_beam"]), "--overwrite"]
+               "--retry_beam", str(settings["retry_beam"]), "--overwrite", "--clean"]
     if settings.get("single_speaker"):
         options.append("--single_speaker")
 

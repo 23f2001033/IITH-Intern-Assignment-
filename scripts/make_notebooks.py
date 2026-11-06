@@ -14,10 +14,12 @@ subprocess.run("pip install -q pyworld tgt g2p-en inflect unidecode", shell=True
 '''.format(repo=REPO)
 
 PREPARE = [
-    '''# 1. Set QUICK_TRIAL = True for a ~20 minute test of the whole pipeline on a few
-#    minutes of audio. Set it to False for the real run, then use Save Version.
-QUICK_TRIAL = True
+    '''# 1. QUICK_TRIAL = True tests the whole pipeline on a few minutes of audio.
+#    Use False for the real run, then Save Version > Save & Run All.
+QUICK_TRIAL = False
+LANGUAGES = ["English", "Telugu"]
 HOURS_SCALE = 0.05 if QUICK_TRIAL else 1.0
+CORPORA = {"English": ("ai4bharat/Svarah", "svarah"), "Telugu": ("SPRINGLab/IndicTTS_Telugu", "telugu")}
 ''',
     SETUP,
     '''# 2. Install Montreal Forced Aligner
@@ -31,31 +33,42 @@ print(subprocess.run(MFA + " version", shell=True, capture_output=True, text=Tru
 from kaggle_secrets import UserSecretsClient
 os.environ["HF_TOKEN"] = UserSecretsClient().get_secret("HF_TOKEN")
 subprocess.run("pip install -q -U huggingface_hub", shell=True, check=True)
-for repo, name in (("ai4bharat/Svarah", "svarah"), ("SPRINGLab/IndicTTS_Telugu", "telugu")):
+for repo, name in (CORPORA[language] for language in LANGUAGES):
     if not glob.glob("/tmp/raw/{}/data/*.parquet".format(name)):
         subprocess.run("hf download {} --repo-type dataset --local-dir /tmp/raw/{}".format(repo, name), shell=True, check=True)
 del os.environ["HF_TOKEN"]
 ''',
-    '''# 4. Prepare, align and extract features for both languages at the same time.
+    '''# 4. Prepare, align and extract features, with the languages running side by side.
 #    Each language gets its own MFA folder because both corpora are called raw_data.
+import re
 os.makedirs("/kaggle/working/logs", exist_ok=True)
 jobs = {}
-for language, corpus in (("English", "/tmp/raw/svarah"), ("Telugu", "/tmp/raw/telugu")):
+for language in LANGUAGES:
+    corpus = "/tmp/raw/" + CORPORA[language][1]
     work = "/tmp/tts/" + language
     shutil.rmtree(work, ignore_errors=True)
     shutil.rmtree("/tmp/mfa_" + language, ignore_errors=True)
     command = [
         "python", "{}/{}/preprocess.py".format(PROJECT, language), "--stage", "all",
         "--corpus_path", corpus, "--work_dir", work, "--mfa_command", MFA,
-        "--jobs", "2", "--hours_scale", str(HOURS_SCALE),
+        "--jobs", str(4 // len(LANGUAGES)), "--hours_scale", str(HOURS_SCALE),
     ]
     log = open("/kaggle/working/logs/prepare_{}.log".format(language), "w")
     env = dict(os.environ, MFA_ROOT_DIR="/tmp/mfa_" + language)
     jobs[language] = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env)
 
+def latest_step(language):
+    with open("/kaggle/working/logs/prepare_{}.log".format(language), "rb") as f:
+        f.seek(0, 2)
+        f.seek(max(0, f.tell() - 4000))
+        text = f.read().decode(errors="replace")
+    lines = [line.strip() for line in text.replace("\\r", "\\n").split("\\n") if line.strip()]
+    return lines[-1][:100] if lines else "(starting)"
+
 while any(p.poll() is None for p in jobs.values()):
     time.sleep(120)
-    print(time.strftime("%H:%M"), {k: ("running" if p.poll() is None else p.returncode) for k, p in jobs.items()}, flush=True)
+    for language, p in jobs.items():
+        print(time.strftime("%H:%M"), language, "running" if p.poll() is None else p.returncode, "|", latest_step(language), flush=True)
 print({k: p.returncode for k, p in jobs.items()})
 for language in jobs:
     print("=" * 30, language)
@@ -80,14 +93,15 @@ subprocess.run("ls -la /kaggle/working; du -sh /kaggle/working/*", shell=True)
 
 TRAIN = [
     '''# Settings: use GPU T4 x2, and add the prepare notebook's output as an input.
-# Each language trains on its own GPU, so one session costs half the GPU hours.
+# Each language in LANGUAGES trains on its own GPU.
+LANGUAGES = ["English", "Telugu"]
 MAX_HOURS = 10
 RESTORE_STEP = {"English": 0, "Telugu": 0}
 ''',
     SETUP,
     '''# Unpack the features. Checkpoints and logs live in /kaggle/working so Kaggle keeps them.
 subprocess.run("nvidia-smi", shell=True)
-for language in ("English", "Telugu"):
+for language in LANGUAGES:
     tar = glob.glob("/kaggle/input/**/{}_preprocessed.tar".format(language), recursive=True)[0]
     work = "/tmp/tts/" + language
     os.makedirs(work, exist_ok=True)
@@ -102,7 +116,7 @@ for language in ("English", "Telugu"):
     '''# Train both models at once, one per GPU
 os.makedirs("/kaggle/working/logs", exist_ok=True)
 jobs = {}
-for gpu, language in enumerate(("English", "Telugu")):
+for gpu, language in enumerate(LANGUAGES):
     command = ["python", "{}/{}/train.py".format(PROJECT, language), "--work_dir", "/tmp/tts/" + language,
                "--max_hours", str(MAX_HOURS), "--restore_step", str(RESTORE_STEP[language])]
     log = open("/kaggle/working/logs/train_{}.log".format(language), "a")
@@ -139,7 +153,7 @@ for language, job in jobs.items():
     for name in ("stats.json", "speakers.json", "target_speaker.txt"):
         shutil.copy(work + "/preprocessed_data/" + name, assets)
 
-if jobs["English"].returncode == 0:
+if "English" in jobs and jobs["English"].returncode == 0:
     subprocess.run(["python", PROJECT + "/English/inference.py", "--work_dir", "/tmp/tts/English",
                     "--ckpt_file", "/tmp/tts/English/ckpt/best.pth.tar", "--frontend", "stock",
                     "--results_dir", "/kaggle/working/Results/English/stock_frontend_comparison"], check=True)
