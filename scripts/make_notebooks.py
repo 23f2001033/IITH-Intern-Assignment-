@@ -242,6 +242,59 @@ assert all(p.returncode == 0 for p in jobs.values()), "A scoring job failed; see
 ]
 
 
+FINISH = [
+    '''# Finishes the English learning-rate schedule from its last checkpoint.
+# The first run hit the 10-hour limit after only the first drop, at step 50,000.
+# Use GPU T4 x2. Add two inputs: prep-english and train-iith-eng.
+RESTORE_STEP = 54153
+TOTAL_STEP = 60000
+ANNEAL_STEPS = [50000, 55000, 57500]
+''',
+    SETUP,
+    '''# Unpack the features and put the saved checkpoint where training expects it
+subprocess.run("nvidia-smi -L", shell=True)
+work = "/tmp/tts/English"
+os.makedirs(work, exist_ok=True)
+tars = [p for p in glob.glob("/kaggle/input/**/English_preprocessed.tar*", recursive=True) if os.path.isfile(p)]
+saved = glob.glob("/kaggle/input/**/English/ckpt/{}.pth.tar".format(RESTORE_STEP), recursive=True)
+assert len(tars) == 1 and len(saved) == 1, (tars, saved)
+subprocess.run(["tar", "-xf", tars[0], "-C", work], check=True)
+for name in ("ckpt", "log"):
+    keep = "/kaggle/working/English/" + name
+    os.makedirs(keep, exist_ok=True)
+    os.symlink(keep, work + "/" + name)
+shutil.copy(saved[0], work + "/ckpt/")
+print(os.listdir(work + "/ckpt"))
+''',
+    '''# Train the remaining steps at the lower learning rates, about an hour
+os.makedirs("/kaggle/working/logs", exist_ok=True)
+command = ["python", PROJECT + "/English/train.py", "--work_dir", work, "--max_hours", "2",
+           "--restore_step", str(RESTORE_STEP), "--total_step", str(TOTAL_STEP),
+           "--anneal_steps"] + [str(step) for step in ANNEAL_STEPS]
+log = open("/kaggle/working/logs/finish_English.log", "a")
+job = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
+                       env=dict(os.environ, CUDA_VISIBLE_DEVICES="0"))
+while job.poll() is None:
+    time.sleep(300)
+    path = "/kaggle/working/English/log/train/log.txt"
+    if os.path.exists(path):
+        print(time.strftime("%H:%M"), open(path).readlines()[-1].strip(), flush=True)
+print("return code", job.returncode)
+print(open("/kaggle/working/logs/finish_English.log", errors="replace").read()[-1500:])
+assert job.returncode == 0, "Training failed; see the log above"
+''',
+    '''# Generate the test sentences from the final checkpoint and from the best one in this stage
+for name, ckpt in (("final", "{}.pth.tar".format(TOTAL_STEP)), ("best", "best.pth.tar")):
+    subprocess.run(["python", PROJECT + "/English/inference.py", "--work_dir", work,
+                    "--ckpt_file", work + "/ckpt/" + ckpt,
+                    "--results_dir", "/kaggle/working/Results/English_" + name], check=True)
+for path in glob.glob("/kaggle/working/English/ckpt/{}.pth.tar".format(RESTORE_STEP)):
+    os.remove(path)
+subprocess.run("du -sh /kaggle/working/*; ls -la /kaggle/working/English/ckpt", shell=True)
+''',
+]
+
+
 def notebook(cells):
     return {
         "cells": [
@@ -259,6 +312,6 @@ if __name__ == "__main__":
     folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "notebooks")
     os.makedirs(folder, exist_ok=True)
     for name, cells in (("01_prepare_data.ipynb", PREPARE), ("02_train_and_generate.ipynb", TRAIN),
-                         ("03_evaluate_speech.ipynb", EVALUATE)):
+                         ("03_evaluate_speech.ipynb", EVALUATE), ("04_finish_english.ipynb", FINISH)):
         with open(os.path.join(folder, name), "w", encoding="utf-8") as f:
             json.dump(notebook(cells), f, indent=1)

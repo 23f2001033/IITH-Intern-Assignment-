@@ -214,6 +214,8 @@ def main(language_dir):
     parser.add_argument("--work_dir", default=default_work_dir(language_dir))
     parser.add_argument("--max_hours", type=float, default=None)
     parser.add_argument("--total_step", type=int, default=None)
+    parser.add_argument("--anneal_steps", type=int, nargs="*", default=None,
+                        help="learning-rate drop steps; overrides config.yaml when finishing a run")
     args = parser.parse_args()
 
     preprocess_config, model_config, train_config, _ = load_config(
@@ -221,4 +223,6 @@ def main(language_dir):
     )
     if args.total_step:
         train_config["step"]["total_step"] = args.total_step
+    if args.anneal_steps is not None:
+        train_config["optimizer"]["anneal_steps"] = args.anneal_steps
     run(args, (preprocess_config, model_config, train_config))

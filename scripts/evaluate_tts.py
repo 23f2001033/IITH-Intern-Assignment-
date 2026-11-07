@@ -17,6 +17,7 @@ import json
 import os
 import random
 import re
+import shutil
 import sys
 import unicodedata
 from collections import Counter, defaultdict
@@ -241,6 +242,9 @@ def main():
     with open(os.path.join(args.results_dir, "summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=1)
 
+    for condition, values in sorted(summary.items()):
+        print(condition, json.dumps(values), flush=True)
+
     # A few clips per main condition, so the scores can be checked by ear
     for condition in summary:
         if condition.startswith("sweep"):
@@ -249,10 +253,7 @@ def main():
         target = os.path.join(args.results_dir, "listen", condition.replace(":", "_"))
         os.makedirs(target, exist_ok=True)
         for item in items:
-            os.replace(item["path"], os.path.join(target, item["id"] + ".wav"))
-
-    for condition, values in sorted(summary.items()):
-        print(condition, json.dumps(values), flush=True)
+            shutil.copy(item["path"], os.path.join(target, item["id"] + ".wav"))
 
 
 if __name__ == "__main__":
