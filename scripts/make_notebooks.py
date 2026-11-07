@@ -183,12 +183,14 @@ EVALUATE = [
 # Use GPU T4 x2. Add five inputs: prep-english, iiit-h, train-iith-eng, train-iith-tel, finish-english.
 # QUICK_TEST = True runs a few clips in a few minutes to prove the setup first.
 QUICK_TEST = False
+# GENERATE_ONLY = True makes only the final test-sentence audio and skips the scoring
+GENERATE_ONLY = True
 LANGUAGES = ["English", "Telugu"]
 CLIPS = 6 if QUICK_TEST else 60
 SWEEP_SPEAKERS = 2 if QUICK_TEST else 12
 SWEEP_CLIPS = 3 if QUICK_TEST else 30
 # English voices to generate the test sentences with, from the last checkpoint
-VOICES = ["spk_d270faea", "spk_8150bedf", "spk_f0bb6d4e", "spk_fae3eb5f"]
+VOICES = ["spk_f0bb6d4e", "spk_8150bedf", "spk_d154ccec", "spk_d270faea"]
 ''',
     SETUP,
     '''# Unpack the features and find both checkpoints for each language
@@ -237,7 +239,7 @@ for language in LANGUAGES:
     '''# Score both languages at once, one per GPU
 os.makedirs("/kaggle/working/logs", exist_ok=True)
 jobs = {}
-for gpu, language in enumerate(LANGUAGES):
+for gpu, language in enumerate([] if GENERATE_ONLY else LANGUAGES):
     command = ["python", PROJECT + "/scripts/evaluate_tts.py", "--language", language,
                "--work_dir", "/tmp/tts/" + language,
                "--results_dir", "/kaggle/working/evaluation/" + language,

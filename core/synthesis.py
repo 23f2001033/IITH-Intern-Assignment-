@@ -71,13 +71,23 @@ PAUSE_GAIN = 0.1
 PAUSE_RAMP_SECONDS = 0.015
 
 
-def lengthen_final_phone(durations, rate, hop, seconds=MIN_FINAL_PHONE_SECONDS):
-    """Return durations with the last phone at least `seconds` long, or None if it already is.
+# Stops, fricatives and affricates; holding these longer would sound unnatural
+OBSTRUENTS = {
+    "P", "B", "T", "D", "K", "G", "F", "V", "TH", "DH", "S", "Z", "SH", "ZH", "HH", "CH", "JH",
+    "k", "kh", "g", "gh", "c", "ch", "j", "jh", "tt", "tth", "dd", "ddh", "t", "th", "d", "dh",
+    "p", "ph", "b", "bh", "sh", "ss", "s", "h",
+}
+
+
+def lengthen_final_phone(durations, rate, hop, last_phone, seconds=MIN_FINAL_PHONE_SECONDS):
+    """Return durations with a final vowel or sonorant at least `seconds` long, else None.
 
     Training clips end at the aligner's last phone boundary, which usually falls before the
     voice has died away, so the model learned short final vowels. Listeners heard the last
     word as cut off. This uses the duration control that FastSpeech 2's design allows.
     """
+    if last_phone.rstrip("012") in OBSTRUENTS:
+        return None
     minimum = int(round(seconds * rate / hop))
     durations = durations.detach().clone().long()
     if durations[0, -1] >= minimum:
@@ -117,7 +127,7 @@ def synthesize_one(model, vocoder, configs, sentence_id, text, groups, speaker):
     with torch.no_grad():
         output = model(*batch)
         # Run again with the final phone lengthened, keeping every other prediction
-        durations = lengthen_final_phone(output[5], rate, hop)
+        durations = lengthen_final_phone(output[5], rate, hop, phones[-1])
         if durations is not None:
             frames_total = int(durations.sum())
             output = model(*batch, None, torch.tensor([frames_total]).to(device), frames_total,
