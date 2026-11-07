@@ -2,6 +2,7 @@
 import argparse
 import os
 import re
+import statistics
 
 import matplotlib
 
@@ -24,10 +25,12 @@ def read_log(path):
 
 
 def smooth(values, window):
+    """Centred rolling median, so the first large losses do not distort the curve."""
     out = []
+    half = window // 2
     for i in range(len(values)):
-        chunk = values[max(0, i - window + 1): i + 1]
-        out.append(sum(chunk) / len(chunk))
+        chunk = values[max(0, i - half): i + half + 1]
+        out.append(statistics.median(chunk))
     return out
 
 

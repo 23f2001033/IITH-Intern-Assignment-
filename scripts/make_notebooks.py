@@ -178,6 +178,70 @@ subprocess.run("du -sh /kaggle/working/*; ls -la /kaggle/working/*/ckpt", shell=
 ]
 
 
+EVALUATE = [
+    '''# Scores speech on validation sentences to show where quality is lost.
+# Use GPU T4 x2. Add four inputs: prep-english, iiit-h, train-iith-eng, train-iith-tel.
+# QUICK_TEST = True runs a few clips in a few minutes to prove the setup first.
+QUICK_TEST = False
+LANGUAGES = ["English", "Telugu"]
+CLIPS = 6 if QUICK_TEST else 60
+SWEEP_SPEAKERS = 2 if QUICK_TEST else 12
+SWEEP_CLIPS = 3 if QUICK_TEST else 30
+''',
+    SETUP,
+    '''# Unpack the features and find both checkpoints for each language
+subprocess.run("nvidia-smi -L", shell=True)
+subprocess.run("find /kaggle/input -maxdepth 6 -not -name '*.npy' | head -60", shell=True)
+
+def checkpoints(language):
+    best = glob.glob("/kaggle/input/**/{}/ckpt/best.pth.tar".format(language), recursive=True)
+    assert len(best) == 1, "Expected one {} checkpoint folder, found: {}".format(language, best)
+    folder = os.path.dirname(best[0])
+    steps = [name.split(".")[0] for name in os.listdir(folder) if name[0].isdigit()]
+    last = max(steps, key=int)
+    return ["best=" + best[0], "last={}/{}.pth.tar".format(folder, last)]
+
+for language in LANGUAGES:
+    work = "/tmp/tts/" + language
+    os.makedirs(work, exist_ok=True)
+    tars = glob.glob("/kaggle/input/**/{}_preprocessed.tar*".format(language), recursive=True)
+    tars = [path for path in tars if os.path.isfile(path)]
+    assert len(tars) == 1, "Expected one {} features tar, found: {}".format(language, tars)
+    subprocess.run(["tar", "-xf", tars[0], "-C", work], check=True)
+    print(language, checkpoints(language))
+''',
+    '''# Score both languages at once, one per GPU
+os.makedirs("/kaggle/working/logs", exist_ok=True)
+jobs = {}
+for gpu, language in enumerate(LANGUAGES):
+    command = ["python", PROJECT + "/scripts/evaluate_tts.py", "--language", language,
+               "--work_dir", "/tmp/tts/" + language,
+               "--results_dir", "/kaggle/working/evaluation/" + language,
+               "--audio_dir", "/tmp/eval_audio/" + language, "--clips", str(CLIPS)]
+    for item in checkpoints(language):
+        command += ["--ckpt", item]
+    if language == "English":
+        command += ["--sweep_speakers", str(SWEEP_SPEAKERS), "--sweep_clips", str(SWEEP_CLIPS)]
+    log = open("/kaggle/working/logs/evaluate_{}.log".format(language), "a")
+    jobs[language] = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
+                                      env=dict(os.environ, CUDA_VISIBLE_DEVICES=str(gpu)))
+
+def last_line(language):
+    lines = open("/kaggle/working/logs/evaluate_{}.log".format(language), errors="replace").readlines()
+    return lines[-1].strip()[:150] if lines else "(starting)"
+
+while any(p.poll() is None for p in jobs.values()):
+    time.sleep(60)
+    for language in jobs:
+        print(time.strftime("%H:%M"), language, last_line(language), flush=True)
+print({k: p.returncode for k, p in jobs.items()})
+for language in jobs:
+    print(language, open("/kaggle/working/logs/evaluate_{}.log".format(language), errors="replace").read()[-6000:])
+assert all(p.returncode == 0 for p in jobs.values()), "A scoring job failed; see the log above"
+''',
+]
+
+
 def notebook(cells):
     return {
         "cells": [
@@ -194,6 +258,7 @@ def notebook(cells):
 if __name__ == "__main__":
     folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "notebooks")
     os.makedirs(folder, exist_ok=True)
-    for name, cells in (("01_prepare_data.ipynb", PREPARE), ("02_train_and_generate.ipynb", TRAIN)):
+    for name, cells in (("01_prepare_data.ipynb", PREPARE), ("02_train_and_generate.ipynb", TRAIN),
+                         ("03_evaluate_speech.ipynb", EVALUATE)):
         with open(os.path.join(folder, name), "w", encoding="utf-8") as f:
             json.dump(notebook(cells), f, indent=1)

@@ -157,9 +157,9 @@ def plot_word_comparison(items, word, label, path):
             raise ValueError("{} not found in {}".format(word, item["id"]))
         phones = item["phones"][start:start + count]
         x = np.arange(len(phones))
-        for ax, (key, label) in zip(axes, keys):
+        for ax, (key, axis_label) in zip(axes, keys):
             ax.bar(x + offset, item[key][start:start + count], width=0.38, label=item["id"])
-            ax.set_ylabel(label)
+            ax.set_ylabel(axis_label)
             ax.set_xticks(x)
             ax.set_xticklabels(phones, fontsize=8)
     axes[0].legend()

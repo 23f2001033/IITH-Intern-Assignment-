@@ -97,7 +97,7 @@ train:
     anneal_steps: [16000, 22400, 28800]
     anneal_rate: 0.3
   step:
-    # Sized to fit a 10-hour Kaggle run: clips are about 1.4x longer than English
+    # Sized to fit a 10-hour Kaggle run; about 212 passes over the training set
     total_step: 32000
     log_step: 100
     synth_step: 5000
