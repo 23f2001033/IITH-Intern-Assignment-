@@ -75,6 +75,7 @@ python English/train.py --work_dir work/English --restore_step 54153 --anneal_st
 python Telugu/train.py  --work_dir work/Telugu
 
 # Score checkpoints on validation clips (Whisper WER/CER, UTMOS) and sweep English voices
+# (needs `pip install transformers` in addition to requirements.txt)
 python scripts/evaluate_tts.py --language English --work_dir work/English \
     --ckpt step60000=work/English/ckpt/60000.pth.tar --results_dir eval/English \
     --audio_dir eval_audio/English --sweep_speakers 12
