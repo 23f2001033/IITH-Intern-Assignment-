@@ -221,9 +221,10 @@ for language in LANGUAGES:
     subprocess.run(["tar", "-xf", tars[0], "-C", work], check=True)
     print(language, checkpoints(language))
 ''',
-    '''# Generate the test sentences from each language's newest checkpoint, in every candidate English voice
+    '''# Generate the test sentences: English from its newest checkpoint in every candidate voice,
+# Telugu from its best-validation checkpoint (step 13,000), which native listeners preferred
 for language in LANGUAGES:
-    last = checkpoints(language)[-1].split("=", 1)[1]
+    last = checkpoints(language)[0 if language == "Telugu" else -1].split("=", 1)[1]
     voices = VOICES if language == "English" else [None]
     for voice in voices:
         command = ["python", "{}/{}/inference.py".format(PROJECT, language), "--work_dir", "/tmp/tts/" + language,

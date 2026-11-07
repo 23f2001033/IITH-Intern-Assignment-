@@ -66,6 +66,41 @@ def add_silence(wav, rate, seconds=PAD_SECONDS):
     return np.concatenate([pad, wav, pad]).astype(np.int16)
 
 
+MIN_FINAL_PHONE_SECONDS = 0.14
+PAUSE_GAIN = 0.1
+PAUSE_RAMP_SECONDS = 0.015
+
+
+def lengthen_final_phone(durations, rate, hop, seconds=MIN_FINAL_PHONE_SECONDS):
+    """Return durations with the last phone at least `seconds` long, or None if it already is.
+
+    Training clips end at the aligner's last phone boundary, which usually falls before the
+    voice has died away, so the model learned short final vowels. Listeners heard the last
+    word as cut off. This uses the duration control that FastSpeech 2's design allows.
+    """
+    minimum = int(round(seconds * rate / hop))
+    durations = durations.detach().clone().long()
+    if durations[0, -1] >= minimum:
+        return None
+    durations[0, -1] = minimum
+    return durations
+
+
+def quiet_pauses(wav, phones, frames, hop, rate, gain=PAUSE_GAIN, ramp_seconds=PAUSE_RAMP_SECONDS):
+    """Lower the vocoder's low hum inside predicted pauses ("sp"), with short ramps at each side."""
+    wav = wav.astype(np.float32)
+    ramp = int(rate * ramp_seconds)
+    edges = np.concatenate([[0], np.cumsum(frames)]).astype(int) * hop
+    for phone, start, end in zip(phones, edges[:-1], edges[1:]):
+        if phone != "sp" or end - start < 3 * ramp:
+            continue
+        curve = np.full(end - start, gain, dtype=np.float32)
+        curve[:ramp] = np.linspace(1.0, gain, ramp)
+        curve[-ramp:] = np.linspace(gain, 1.0, ramp)
+        wav[start:end] *= curve[: len(wav[start:end])]
+    return wav.astype(np.int16)
+
+
 def synthesize_one(model, vocoder, configs, sentence_id, text, groups, speaker):
     preprocess_config, model_config, _ = configs
     phones = [p for _, group in groups for p in group]
@@ -77,11 +112,18 @@ def synthesize_one(model, vocoder, configs, sentence_id, text, groups, speaker):
         torch.from_numpy(np.array([len(sequence)])).to(device),
         len(sequence),
     )
+    hop = preprocess_config["preprocessing"]["stft"]["hop_length"]
+    rate = preprocess_config["preprocessing"]["audio"]["sampling_rate"]
     with torch.no_grad():
         output = model(*batch)
+        # Run again with the final phone lengthened, keeping every other prediction
+        durations = lengthen_final_phone(output[5], rate, hop)
+        if durations is not None:
+            frames_total = int(durations.sum())
+            output = model(*batch, None, torch.tensor([frames_total]).to(device), frames_total,
+                           None, None, durations)
 
     mel_lens = output[9]
-    hop = preprocess_config["preprocessing"]["stft"]["hop_length"]
     wav = vocoder_infer(
         output[1].transpose(1, 2), vocoder, model_config, preprocess_config,
         lengths=mel_lens * hop,
@@ -94,8 +136,8 @@ def synthesize_one(model, vocoder, configs, sentence_id, text, groups, speaker):
     pitch_mean, pitch_std = stats["pitch"][2:4]
     energy_mean, energy_std = stats["energy"][2:4]
 
-    rate = preprocess_config["preprocessing"]["audio"]["sampling_rate"]
     frames = output[5][0].detach().cpu().numpy()
+    wav = quiet_pauses(wav, phones, frames, hop, rate)
     speech_seconds = round(len(wav) / rate, 2)
     wav = add_silence(wav, rate)
     return wav, {
@@ -110,6 +152,7 @@ def synthesize_one(model, vocoder, configs, sentence_id, text, groups, speaker):
         "energy": (output[3][0].detach().cpu().numpy() * energy_std + energy_mean).round(3).tolist(),
         "total_seconds": speech_seconds,
         "silence_padding_seconds": PAD_SECONDS,
+        "final_phone_lengthened": durations is not None,
     }
 
 
