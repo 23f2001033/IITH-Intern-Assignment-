@@ -45,6 +45,27 @@ def speaker_id(preprocess_config, name):
     return speakers[name], name
 
 
+PAD_SECONDS = 0.3
+FADE_SECONDS = 0.005
+
+
+def add_silence(wav, rate, seconds=PAD_SECONDS):
+    """Fade the edges and add silence before and after the speech.
+
+    Training clips had their leading and trailing silence trimmed, so the model starts
+    speaking on the very first sample. Many players and earphones clip the first
+    fraction of a second, which listeners heard as a missing first word.
+    """
+    wav = wav.astype(np.float32)
+    fade = min(int(rate * FADE_SECONDS), len(wav) // 2)
+    if fade:
+        ramp = np.linspace(0.0, 1.0, fade, dtype=np.float32)
+        wav[:fade] *= ramp
+        wav[-fade:] *= ramp[::-1]
+    pad = np.zeros(int(rate * seconds), dtype=np.float32)
+    return np.concatenate([pad, wav, pad]).astype(np.int16)
+
+
 def synthesize_one(model, vocoder, configs, sentence_id, text, groups, speaker):
     preprocess_config, model_config, _ = configs
     phones = [p for _, group in groups for p in group]
@@ -75,6 +96,8 @@ def synthesize_one(model, vocoder, configs, sentence_id, text, groups, speaker):
 
     rate = preprocess_config["preprocessing"]["audio"]["sampling_rate"]
     frames = output[5][0].detach().cpu().numpy()
+    speech_seconds = round(len(wav) / rate, 2)
+    wav = add_silence(wav, rate)
     return wav, {
         "id": sentence_id,
         "text": text,
@@ -85,7 +108,8 @@ def synthesize_one(model, vocoder, configs, sentence_id, text, groups, speaker):
         # The model predicts normalised values; convert back to physical units
         "f0_hz": (output[2][0].detach().cpu().numpy() * pitch_std + pitch_mean).round(1).tolist(),
         "energy": (output[3][0].detach().cpu().numpy() * energy_std + energy_mean).round(3).tolist(),
-        "total_seconds": round(len(wav) / rate, 2),
+        "total_seconds": speech_seconds,
+        "silence_padding_seconds": PAD_SECONDS,
     }
 
 
