@@ -180,13 +180,15 @@ subprocess.run("du -sh /kaggle/working/*; ls -la /kaggle/working/*/ckpt", shell=
 
 EVALUATE = [
     '''# Scores speech on validation sentences to show where quality is lost.
-# Use GPU T4 x2. Add four inputs: prep-english, iiit-h, train-iith-eng, train-iith-tel.
+# Use GPU T4 x2. Add five inputs: prep-english, iiit-h, train-iith-eng, train-iith-tel, finish-english.
 # QUICK_TEST = True runs a few clips in a few minutes to prove the setup first.
 QUICK_TEST = False
 LANGUAGES = ["English", "Telugu"]
 CLIPS = 6 if QUICK_TEST else 60
 SWEEP_SPEAKERS = 2 if QUICK_TEST else 12
 SWEEP_CLIPS = 3 if QUICK_TEST else 30
+# English voices to generate the test sentences with, from the last checkpoint
+VOICES = ["spk_d270faea", "spk_8150bedf", "spk_f0bb6d4e", "spk_fae3eb5f"]
 ''',
     SETUP,
     '''# Unpack the features and find both checkpoints for each language
@@ -194,12 +196,21 @@ subprocess.run("nvidia-smi -L", shell=True)
 subprocess.run("find /kaggle/input -maxdepth 6 -not -name '*.npy' | head -60", shell=True)
 
 def checkpoints(language):
-    best = glob.glob("/kaggle/input/**/{}/ckpt/best.pth.tar".format(language), recursive=True)
-    assert len(best) == 1, "Expected one {} checkpoint folder, found: {}".format(language, best)
-    folder = os.path.dirname(best[0])
-    steps = [name.split(".")[0] for name in os.listdir(folder) if name[0].isdigit()]
-    last = max(steps, key=int)
-    return ["best=" + best[0], "last={}/{}.pth.tar".format(folder, last)]
+    """The newest numbered checkpoint of each training run, plus Telugu's best-validation one."""
+    paths = glob.glob("/kaggle/input/**/{}/ckpt/*.pth.tar".format(language), recursive=True)
+    newest = {}
+    for path in paths:
+        name = os.path.basename(path)
+        if name[0].isdigit():
+            item = (int(name.split(".")[0]), path)
+            newest[os.path.dirname(path)] = max(newest.get(os.path.dirname(path), item), item)
+    chosen = ["step{}={}".format(step, path) for step, path in sorted(newest.values())]
+    if language == "Telugu":
+        best = [path for path in paths if path.endswith("best.pth.tar")]
+        assert len(best) == 1, best
+        chosen = ["best=" + best[0]] + chosen
+    assert chosen, "No {} checkpoints found".format(language)
+    return chosen
 
 for language in LANGUAGES:
     work = "/tmp/tts/" + language
@@ -209,6 +220,18 @@ for language in LANGUAGES:
     assert len(tars) == 1, "Expected one {} features tar, found: {}".format(language, tars)
     subprocess.run(["tar", "-xf", tars[0], "-C", work], check=True)
     print(language, checkpoints(language))
+''',
+    '''# Generate the test sentences from each language's newest checkpoint, in every candidate English voice
+for language in LANGUAGES:
+    last = checkpoints(language)[-1].split("=", 1)[1]
+    voices = VOICES if language == "English" else [None]
+    for voice in voices:
+        command = ["python", "{}/{}/inference.py".format(PROJECT, language), "--work_dir", "/tmp/tts/" + language,
+                   "--ckpt_file", last, "--results_dir",
+                   "/kaggle/working/final/{}_{}".format(language, voice or os.path.basename(last).split(".")[0])]
+        if voice:
+            command += ["--speaker", voice]
+        subprocess.run(command, check=True)
 ''',
     '''# Score both languages at once, one per GPU
 os.makedirs("/kaggle/working/logs", exist_ok=True)
