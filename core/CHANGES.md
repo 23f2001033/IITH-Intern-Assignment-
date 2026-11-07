@@ -59,3 +59,13 @@ This file lists every change. The model architecture itself is unchanged.
 `train.py`, `synthesize.py` and the three YAML files per dataset became `trainer.py`, `synthesis.py` and one
 `config.yaml` per language. `English/` and `Telugu/` contain small entry scripts that call this shared code,
 so both models use the same implementation.
+
+## Added after training
+
+| File | Change |
+|---|---|
+| `trainer.py` | `--anneal_steps` overrides the learning-rate drop steps when resuming, used to finish the English schedule from step 54,153 to 60,000 within the remaining time. |
+| `synthesis.py` | Inference-time correction of generated audio: a final vowel or sonorant shorter than 140 ms is lengthened to 140 ms and the decoder is rerun; vocoder output in predicted pauses is lowered to 10%; 5 ms fades and 0.3 s of silence are added at both ends. This compensates for training clips trimmed to the first and last phone (report, Section 7.4). |
+| `synthesis.py` | Fixed the homograph comparison plot, where a reused loop variable overwrote the word shown in the title. |
+| `../scripts/evaluate_tts.py` | New. Scores vocoder-only, teacher-forced and free synthesis on validation clips with Whisper (WER, CER) and UTMOS, with bootstrap intervals, and sweeps English voices. |
+| `../scripts/plot_losses.py` | Training loss is smoothed with a centred rolling median, which does not shift the curve in steps or bend at learning-rate drops. |
